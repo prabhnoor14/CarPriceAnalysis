@@ -1,0 +1,449 @@
+---
+title: "Gr9FinalProject"
+output: html_document
+date: "2025-11-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Initial Data Preparation & Cleaning
+
+The dataset can be found here: https://www.kaggle.com/datasets/austinreese/craigslist-carstrucks-data. This dataset was not used in the previous research we conducted - more details in the report.
+
+### Reading in the data
+```{r}
+used_cars = read.csv('vehicles.csv')
+```
+
+### Filtering by region
+```{r}
+va_used_cars = used_cars[used_cars$state == 'va', ]
+```
+
+### Checking null counts & seeing what happens if all nulls deleted
+```{r}
+head(va_used_cars)
+```
+```{r}
+colSums(is.na(va_used_cars))
+```
+
+So it looks like the entire county column is fully null, let's just get rid of that. Now I'm seeing some empty values for strings (i.e. model, condition, cylinders) that don't show in the is.na call - so let's consider empty strings as nulls as well and count that to see what the NA distribution looks like.
+
+```{r}
+va_used_cars[va_used_cars == ""] = NA
+colSums(is.na(va_used_cars))
+```
+OK that makes a little bit more sense. Why don't we see how many entries we've got post-dropping all nulls + dropping the county column?
+
+On top of that, we should probably drop a few features that won't matter - i.e. id, url, region_url, VIN, image_url, description, state, lat, long, and posting_date. These are irrelevant because they don't actually have to do with the car itself (except the VIN, but that's just the vehicle identification number so won't be useful in any models or vis). The lat/long COULD be interesting to see factors like location play into this, but we felt that the feature "region" was a good enough measure of that and that we didn't need to go SUPER granular (i.e. individual towns).
+
+```{r}
+va_used_cars$county = NULL
+va_used_cars$id = NULL
+va_used_cars$url = NULL
+va_used_cars$region_url = NULL
+va_used_cars$VIN = NULL
+va_used_cars$image_url = NULL
+va_used_cars$description = NULL
+va_used_cars$state = NULL
+va_used_cars$lat = NULL
+va_used_cars$long = NULL
+va_used_cars$posting_date = NULL
+cleaned_va_used_cars = na.omit(va_used_cars)
+```
+
+```{r}
+summary(cleaned_va_used_cars)
+colSums(is.na(cleaned_va_used_cars))
+```
+
+Great. Might need to take a look at that listing with the extremely high odometer reading because I'm highly doubtful that there could be a car with 1,795,320 miles on it that hasn't broken down yet/gone through 6 engine/trans swaps and a few frame/body swaps, so let's take a look - with visualizations, in our EDA section!
+
+Before we do that though, we need to do some processing like changing certain features to factors for visualization + model usage. I'm gonna be changing the chars to factors for stuff like the region, manufacturer, model, condition, cylinders, fuel, title_status, transmission, drive, size, type, and paint_color.
+```{r}
+cleaned_va_used_cars$region = as.factor(cleaned_va_used_cars$region)
+cleaned_va_used_cars$manufacturer = as.factor(cleaned_va_used_cars$manufacturer)
+cleaned_va_used_cars$model = as.factor(cleaned_va_used_cars$model)
+cleaned_va_used_cars$condition = as.factor(cleaned_va_used_cars$condition)
+cleaned_va_used_cars$cylinders = as.factor(cleaned_va_used_cars$cylinders)
+cleaned_va_used_cars$fuel = as.factor(cleaned_va_used_cars$fuel)
+cleaned_va_used_cars$title_status = as.factor(cleaned_va_used_cars$title_status)
+cleaned_va_used_cars$transmission = as.factor(cleaned_va_used_cars$transmission)
+cleaned_va_used_cars$drive = as.factor(cleaned_va_used_cars$drive)
+cleaned_va_used_cars$size = as.factor(cleaned_va_used_cars$size)
+cleaned_va_used_cars$type = as.factor(cleaned_va_used_cars$type)
+cleaned_va_used_cars$paint_color = as.factor(cleaned_va_used_cars$paint_color)
+```
+
+```{r}
+summary(cleaned_va_used_cars)
+```
+
+LGTM! On to the EDA we go!
+
+## EDA
+
+So let's visualize literally everything (except model, because respectfully there are such an ungodly number of car models and it wouldn't do justice to even think about visualizing all of them).
+
+NOTE: I chose not to use par(mfrow=c(1,2)) anywhere here and just put them on their own graph spots, so that they could be as big as possible! For most of these that was required because otherwise it was simply too squished and couldn't meaningfully be interpreted, to be honest.
+
+### Individual Features and Price
+
+#### Region
+
+```{r}
+barplot(table(cleaned_va_used_cars$region), las = 2, main="Region Counts")
+```
+
+```{r}
+price_by_region = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$region), mean)
+barplot(price_by_region$x, names.arg=price_by_region$Group.1, las=2, main="Average Price by Region")
+```
+
+So we've got a bunch of our listings in Richmond and Hampton Roads (makes sense given they're highly populated) but the most expensive listings are in Southwest VA!
+
+#### Year
+
+```{r}
+hist(cleaned_va_used_cars$year, las = 2, main="Year Counts", xlab="Year")
+```
+
+```{r}
+plot(cleaned_va_used_cars$year, cleaned_va_used_cars$price, main="Price vs. Year", xlab="Year", ylab="Price")
+```
+
+So the takeaway here is that there are a lot more cars from within the last 20 years, and those cars tend to be higher in listed price for the newest ones as a general trend (but not concrete)! Makes sense.
+
+#### Manufacturer
+
+```{r}
+barplot(table(cleaned_va_used_cars$manufacturer), las = 2, main="Manufacturer Counts")
+```
+
+```{r}
+price_by_manufacturer = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$manufacturer), mean)
+barplot(price_by_manufacturer$x, names.arg=price_by_manufacturer$Group.1, las=2, main="Average Price by Manufacturer")
+```
+So of this we can gather that we've got a ton of Ford and Chevy listings (makes sense, being American brands) but the highest priced listings are like Teslas and GMCs! Now that doesn't mean a whole lot since there's very very few teslas out on the market (count-wise) but still.
+
+#### Condition
+
+```{r}
+barplot(table(cleaned_va_used_cars$condition), las = 2, main="Condition Counts")
+```
+
+```{r}
+price_by_condition = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$condition), mean)
+barplot(price_by_condition$x, names.arg=price_by_condition$Group.1, las=2, main="Average Price by Condition")
+```
+
+So looks like there's a bunch of "excellent" condition listings (makes sense, most people want to advertise their cars as being in excellent condition) but the most expensively priced ones are new! This checks out, but it's fair to note that there are almost no new listings so it's probably a bit skewed :)
+
+#### Cylinders
+
+```{r}
+barplot(table(cleaned_va_used_cars$cylinders), las = 2, main="Cylinder Counts")
+```
+
+```{r}
+price_by_cylinders = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$cylinders), mean)
+barplot(price_by_cylinders$x, names.arg=price_by_cylinders$Group.1, las=2, main="Average Price by Cylinders")
+```
+
+Tons and tons of 4, 6, and 8 cylinder listings (which make a lot of sense, since those are the most common cylinder counts with Inline-4, V6/I6 and V8 being super common in America). And it seems like the 8 cyls, 10 cyls, and others are priced the highest (which also make sense, since those engines are costly for the extra cylinders! and fyi others might refer to stuff like rotary engines which are super expensive too).
+
+#### Fuel
+
+```{r}
+barplot(table(cleaned_va_used_cars$fuel), las = 2, main="Fuel Type Counts")
+```
+
+```{r}
+price_by_fuel_type = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$fuel), mean)
+barplot(price_by_fuel_type$x, names.arg=price_by_fuel_type$Group.1, las=2, main="Average Price by Fuel Type")
+```
+
+Looks like gas cars are the most common listings (which make sense as they're the most common car), but people listed their electric cars and diesel cars as the most expensive (typical diesel supremacists). Note again that there are very few electric car listings if any, so must be those Teslas.
+
+#### Odometer
+
+```{r}
+hist(cleaned_va_used_cars$odometer, las = 2, main="Odometer Reading Counts", xlab="Odometer Reading (miles)")
+```
+
+OK that visualization doesn't really help. Let's boxplot it?
+
+```{r}
+boxplot(cleaned_va_used_cars$odometer, main="Odometer Reading Counts", ylab="Odometer Reading (miles)")
+```
+
+Much better :) Looks like there are some outliers, not great but we carry on.
+
+```{r}
+plot(cleaned_va_used_cars$odometer, cleaned_va_used_cars$price, main="Price vs. Odometer Reading", xlab="Odometer Reading (miles)", ylab="Price")
+```
+
+That checks out - there are a few odometer outliers (super high mileage, not sure why but it's probably fake) but there's an obvious trend where lower mileage == higher listed price, which makes a lot of sense.
+
+#### Title Status
+
+```{r}
+barplot(table(cleaned_va_used_cars$title_status), las = 2, main="Title Status Counts")
+```
+
+```{r}
+price_by_title_status = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$title_status), mean)
+barplot(price_by_title_status$x, names.arg=price_by_title_status$Group.1, las=2, main="Average Price by Title Status")
+```
+
+Well it looks like most of the listings are clean titles anyway. Looks like liens and rebuilts have pretty high pricings - which makes sense, because cars on lien mean that they're still paying it off so it's probably a "pay the rest of my car off and you can have it". The rebuilt average price being higher than clean titles is interesting though....
+
+#### Transmission
+
+```{r}
+barplot(table(cleaned_va_used_cars$transmission), las = 2, main="Transmission Type Counts")
+```
+
+```{r}
+price_by_transmission = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$transmission), mean)
+barplot(price_by_transmission$x, names.arg=price_by_transmission$Group.1, las=2, main="Average Price by Transmission Type")
+```
+
+Automatic cars are both the most common (which makes sense given that they dominate the market for simplicity and ease of use for the average driver). Other has the most expensive listings but there are so few of them that it's probably just a few dominating that average.
+
+#### Drive
+
+```{r}
+barplot(table(cleaned_va_used_cars$drive), las = 2, main="Drive Type Counts")
+```
+
+```{r}
+price_by_drive_type = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$drive), mean)
+barplot(price_by_drive_type$x, names.arg=price_by_drive_type$Group.1, las=2, main="Average Price by Drive Type")
+```
+
+So 4 wheel drive cars (where all 4 wheels spin, giving better traction in off road, mud, etc.) tend to be the most common and are listed at the highest price. That's kind of interesting - I also notice that AWD (all wheel drive) cars aren't in here, so maybe they just slammed the two together? Honestly not sure.
+
+#### Size
+
+```{r}
+barplot(table(cleaned_va_used_cars$size), las = 2, main="Size Category Counts")
+```
+
+```{r}
+price_by_size = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$size), mean)
+barplot(price_by_size$x, names.arg=price_by_size$Group.1, las=2, main="Average Price by Size Category")
+```
+
+And unsurprisingly, the most commonly listed cars were full size cars which also had the highest price listing. Super unsurprising here.
+
+#### Type
+
+```{r}
+barplot(table(cleaned_va_used_cars$type), las = 2, main="Car Type Counts")
+```
+
+```{r}
+price_by_car_type = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$type), mean)
+barplot(price_by_car_type$x, names.arg=price_by_car_type$Group.1, las=2, main="Average Price by Car Type")
+```
+
+This makes sense - most of the listings tend to be sedans, SUVs, and trucks, which are some of the most common cars on the market. The highest priced listings tend to be trucks though!
+
+#### Paint Color
+
+```{r}
+barplot(table(cleaned_va_used_cars$paint_color), las = 2, main="Paint Color Counts")
+```
+
+```{r}
+price_by_paint_color = aggregate(cleaned_va_used_cars$price, list(cleaned_va_used_cars$paint_color), mean)
+barplot(price_by_paint_color$x, names.arg=price_by_paint_color$Group.1, las=2, main="Average Price by Paint Color")
+```
+
+And the most common cars tend to be white and black, the old classics. But the most expensive are actually white and red, which also kind of make sense as red cars are often seen as either more "luxury" or "sportier" sometimes!
+
+And now that we've visualized all of that, let's move into the actual models!
+
+## Model Fitting (test-train split)
+
+Before we can start fitting any models, we need to split our cleaned dataset into training and testing sets.To keep things standard, we use an 80/20 split. 
+
+```{r}
+set.seed(123)  #for reproducibility
+data_rows <- floor(0.80 * nrow(cleaned_va_used_cars))
+train_indices <- sample(c(1:nrow(cleaned_va_used_cars)), data_rows, replace = FALSE)
+train_data <- cleaned_va_used_cars[train_indices,]
+test_data <- cleaned_va_used_cars[-train_indices,]
+```
+
+Before moving on: the statistical techniques used in this R file will include Random Forest, Boosting Trees, and Linear Regression.
+
+## Model Fitting: Random Forest
+
+We fit a random forest model to predict used car prices using basically all of the other variables. We excluded model because it has too many categorical levels, which exceeds the random forest implementation limits in R.
+
+```{r}
+library(randomForest)
+rf_model <- randomForest(price ~ .-model,data = train_data, importance = TRUE)
+importance(rf_model)
+```
+We can see that the most important predictors are year, odometer, fuel, and type. Region, manufacturer, cylinders, paint color, and drive still have some impact on price. However, transmission, title static, size, and condition contribute little to the model. 
+
+To better understand how our Random Forest model is making decisions, we visualize the variable importance.
+
+```{r}
+varImpPlot(rf_model, main="Variable Importance (Random Forest)")
+```
+
+The age of the car and its mileage seem to be big determining factors for price. 
+
+Next, we will use the trained model to predict prices on the test set.
+
+```{r}
+yhat <- predict(rf_model, newdata = test_data)
+test_mse <- mean((yhat - test_data$price)^2)
+test_mse
+rmse <- sqrt(test_mse)
+rmse
+```
+The root mean squared error is approximately $5,029.2, meaning the predicted values differ from the true values by about $5,029.2. 
+
+We also visualize the model's accuracy by plotting the Predicted Prices against the Actual Prices.
+
+```{r}
+plot(yhat, test_data$price, 
+     main = "Random Forest: Predicted vs Actual Price",
+     xlab = "Predicted Price", 
+     ylab = "Actual Price")
+abline(0, 1, col = "red", lwd = 2)
+fit_line <- lm(test_data$price ~ yhat)
+coef(fit_line)
+```
+
+## Model Fitting: Boosting
+
+Next, we applied boosting to predict car prices. Boosting builds trees sequentially, where each model is built based on the previous one. Importantly, this time we were able to include the model variable, so we will be able to determine its impact on price as well. 
+
+```{r}
+library(gbm)
+boost.price = gbm(price~., data = train_data, distribution = "gaussian",n.trees = 5000, interaction.depth = 4)
+summary(boost.price)
+```
+
+
+The model variable takes up about 97% of relative influence, showing that the specific car model is the strongest determinant of price. Other factors such as year, region, and odometer also contribute. Type, condition, and paint color have moderate effects, while cylinders, drive, and fuel do not contribute much. 
+
+Looking at both models, we can see that a car’s age and mileage are important for determining its price, but once we include the specific model, it becomes by far the strongest factor. Other features like type, condition, paint color, and region have some influence, but their impact is much smaller in comparison.
+
+```{r}
+par(mfrow = c(1, 2))
+plot(boost.price, i = "year", main = "Partial Dependence: Year")
+plot(boost.price, i = "odometer", main = "Partial Dependence: Odometer")
+
+```
+
+
+```{r}
+yhat_boost <- predict(boost.price, newdata = test_data, n.trees = 5000)
+test_mse_boost <- mean((yhat_boost - test_data$price)^2)
+test_mse_boost
+rmse <- sqrt(test_mse_boost)
+rmse
+```
+```{r}
+plot(yhat_boost, test_data$price, 
+     main = "Boosting: Predicted vs Actual Price",
+     xlab = "Predicted Price", 
+     ylab = "Actual Price") 
+abline(0, 1, col = "red", lwd = 2)
+```
+
+The boosted model’s predictions resulted in a very high mean squared error, around 43 billion, showing that some extreme values may be affecting the fit. The predicted values differ from the true values by about $208129.7. 
+
+Including the model variable turned out to be a problem because it contains a very large number of unique car models, many of which appear only a few times in the dataset. With so many categories and so little repetition, the model column introduces noise instead of useful structure. This leads to overfitting and makes it harder for the algorithm to learn meaningful relationships. Because of this, we refit our models without the model variable to see whether performance improves.
+
+
+```{r}
+boost.price.refined = gbm(price~.-model, data = train_data, distribution = "gaussian",n.trees = 5000, interaction.depth = 4)
+summary(boost.price.refined)
+```
+
+
+```{r}
+yhat_boost_refined <- predict(boost.price.refined, newdata = test_data, n.trees = 5000)
+test_mse_boost_r <- mean((yhat_boost_refined - test_data$price)^2)
+test_mse_boost_r
+rmser <- sqrt(test_mse_boost_r)
+rmser
+```
+
+Removing the model variable made a clear difference, since its huge number of unique values was adding noise and hurting performance. After removing it, the boosted model achieved an RMSE of about 5,350, while the random forest performed slightly better with an RMSE of around 5,029.
+
+We again inspect the predictive performance by plotting predicted values against actual values.
+```{r}
+plot(yhat_boost_refined, test_data$price, 
+     main = "Boosting (Refined): Predicted vs Actual Price",
+     xlab = "Predicted Price", 
+     ylab = "Actual Price") 
+abline(0, 1, col = "red", lwd = 2)
+fit_line <- lm(test_data$price ~ yhat_boost_refined)
+coef(fit_line)
+```
+
+
+## Model Fitting: Linear Regression
+
+Finally, we fit a linear regression model. We will first start by fitting a linear model using all of the predictors. However, once again, we will not include model because it introduces noise instead of useful structure. Having to many unique model variables leads to over fitting.
+
+This model will be used to determine which variables are the most significant predictors for price. Using that information, we fit a refined model that only includes the most significant predictors. 
+
+
+```{r}
+lm_full <- lm(price ~ .-model, data = train_data)
+summary(lm_full)
+```
+Looking at the significance codes in the summary, we can see that year, region, condition, cylinders, fuel, odometer, drive, and type and the most significant. 
+
+Note: We decided not to include cylinders in the model. This is because, by random chance, the train data does not include any data where there are 12 cylinders but the test data does. So, when we tried predicting values we were getting an error because the 12 cylinders varaible was present in the test data but not in the train data. 
+
+
+```{r}
+lm_improved <- lm(price ~ year + region + condition + fuel + odometer + drive + type, data = train_data)
+summary(lm_improved)
+```
+
+To understand whether Linear Regression is appropriate for this task, we must verify some assumptions (such as the existence of a linear relationship, normally distributed residuals, roughly equal variance, and no extreme leverage). The Residuals vs Fitted plot below suggests that the relationship is not a perfect linear relationship and that variance is not constant. The QQ plot suggests that the residuals are not perfectly normal. The Scale-Location graph suggests that residuals do not have equal variance. Lastly, the Residuals vs Leverage graph suggests no extremely influential points to the prediction.
+
+```{r}
+par(mfrow = c(2, 2))
+plot(lm_improved)
+```
+
+```{r}
+
+yhat_ln_r <- predict(lm_improved, newdata = test_data)
+test_mse_lin_r <- mean((yhat_ln_r - test_data$price)^2)
+test_mse_lin_r
+rmse_ln_r <- sqrt(test_mse_lin_r)
+rmse_ln_r
+```
+The refined linear model achieved an RMSE of about 7804.846, which is not as good as the other two models. 
+
+```{r}
+plot(yhat_ln_r, test_data$price, 
+     main = "Linear Regression: Predicted vs Actual Price",
+     xlab = "Predicted Price", 
+     ylab = "Actual Price") 
+abline(0, 1, col = "red", lwd = 2)
+fit_line <- lm(test_data$price ~ yhat_ln_r)
+coef(fit_line)
+```
+
+Now that we have used random forest, boosting, and linear regression to determine the important variables and predict price, we can see which will be most suitable for this dataset. Random forest has a root mean square error (rmse) of 5029. Boosting has an rmse of 5350. Linear regression has an rmse of 7805. While random forest is the best, boosting and random forest has a similar performance. Linear regression has a an error that was a little higher than the others. 
+
+All models agree the year, type, odometer, region, fuel, and cylinders are significant. Condition and drive are placed higher for significance by linear model, but it is not that significant for the other models. Manufacturer is also more significant for the other two models than it is for the linear model.
+
